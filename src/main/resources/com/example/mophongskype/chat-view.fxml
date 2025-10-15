@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.layout.*?>
+<?import javafx.scene.text.*?>
+
+<BorderPane xmlns="http://javafx.com/fxml" xmlns:fx="http://javafx.com/fxml" fx:controller="com.example.mophongskype.ChatController">
+    <top>
+        <HBox alignment="CENTER_LEFT" spacing="10.0" style="-fx-background-color: #0078d4; -fx-padding: 10;">
+            <Text fx:id="titleText" text="Skype" style="-fx-fill: white; -fx-font-weight: bold; -fx-font-size: 16px;"/>
+            <Region HBox.hgrow="ALWAYS"/>
+            <Label fx:id="statusLabel" text="Online" style="-fx-text-fill: white; -fx-font-size: 12px;"/>
+            <Button fx:id="logoutButton" text="Đăng xuất"
+                    style="-fx-background-color: #d13438; -fx-text-fill: white; -fx-background-radius: 3;"
+                    onAction="#handleLogout"/>
+        </HBox>
+    </top>
+
+    <center>
+        <SplitPane dividerPositions="0.3" orientation="HORIZONTAL">
+            <!-- Danh sách người dùng -->
+            <VBox spacing="10.0" style="-fx-background-color: #f8f8f8; -fx-padding: 10;">
+                <Text text="Danh sách người dùng" style="-fx-font-weight: bold; -fx-font-size: 14px;"/>
+                <ListView fx:id="userListView" prefHeight="200.0" style="-fx-background-color: white; -fx-border-color: #ddd;"/>
+                <HBox spacing="5.0">
+                    <Button fx:id="removeUserButton" text="Xóa người dùng"
+                            style="-fx-background-color: #d13438; -fx-text-fill: white; -fx-background-radius: 3;"
+                            onAction="#handleRemoveUser"/>
+                </HBox>
+            </VBox>
+
+            <!-- Khu vực chat -->
+            <VBox spacing="10.0" style="-fx-padding: 10;">
+                <!-- Header cho khu vực chat -->
+                <HBox alignment="CENTER_LEFT" spacing="10.0">
+                    <Text text="Tin nhắn" style="-fx-font-weight: bold; -fx-font-size: 14px;"/>
+                    <Region HBox.hgrow="ALWAYS"/>
+                    <Button fx:id="scrollToBottomButton" text="↓ Cuối"
+                            style="-fx-background-color: #6c757d; -fx-text-fill: white; -fx-background-radius: 3; -fx-font-size: 10px;"
+                            onAction="#handleScrollToBottom"/>
+                </HBox>
+
+                <!-- Khu vực hiển thị tin nhắn -->
+                <ScrollPane fx:id="chatScrollPane" fitToWidth="true"
+                            hbarPolicy="NEVER" vbarPolicy="AS_NEEDED"
+                            style="-fx-background-color: white; -fx-border-color: #ddd; -fx-border-radius: 5;"
+                            prefHeight="400.0">
+                    <VBox fx:id="chatContainer" spacing="8.0" style="-fx-padding: 15; -fx-background-color: #fafafa;"/>
+                </ScrollPane>
+
+                <!-- Khu vực nhập tin nhắn -->
+                <HBox spacing="10.0" alignment="CENTER_LEFT">
+                    <TextField fx:id="messageField" promptText="Nhập tin nhắn..." HBox.hgrow="ALWAYS" onAction="#handleSendMessage"/>
+                    <Button fx:id="sendButton" text="Gửi"
+                            style="-fx-background-color: #0078d4; -fx-text-fill: white; -fx-background-radius: 3;"
+                            onAction="#handleSendMessage"/>
+                </HBox>
+
+                <!-- Khu vực gửi file -->
+                <HBox spacing="10.0" alignment="CENTER_LEFT">
+                    <Label text="Chọn file:"/>
+                    <Button fx:id="chooseFileButton" text="📂 Chọn và Gửi file"
+                            style="-fx-background-color: #ff9800; -fx-text-fill: white; -fx-background-radius: 3;"
+                            onAction="#handleChooseFile"/>
+                </HBox>
+
+                <!-- Khu vực tin nhắn riêng tư -->
+                <HBox spacing="10.0" alignment="CENTER_LEFT">
+                    <Label text="Gửi riêng cho:"/>
+                    <ComboBox fx:id="privateUserCombo" promptText="Chọn người dùng" prefWidth="150.0"/>
+                    <TextField fx:id="privateMessageField" promptText="Tin nhắn riêng..." HBox.hgrow="ALWAYS"/>
+                    <Button fx:id="sendPrivateButton" text="Gửi riêng"
+                            style="-fx-background-color: #107c10; -fx-text-fill: white; -fx-background-radius: 3;"
+                            onAction="#handleSendPrivateMessage"/>
+                </HBox>
+                <!-- Khu vực join phòng -->
+                <HBox spacing="10.0" alignment="CENTER_LEFT">
+                    <Label text="ID Phòng:"/>
+                    <TextField fx:id="roomIdField" promptText="Nhập ID phòng..." prefWidth="150.0"/>
+                    <Button fx:id="joinRoomButton" text="Tham gia phòng"
+                            style="-fx-background-color: #6200EE; -fx-text-fill: white; -fx-background-radius: 3;"
+                            onAction="#handleJoinRoom"/>
+                </HBox>
+
+            </VBox>
+        </SplitPane>
+    </center>
+</BorderPane>

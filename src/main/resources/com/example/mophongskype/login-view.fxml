@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.layout.*?>
+<?import javafx.scene.text.*?>
+
+<BorderPane xmlns="http://javafx.com/fxml" xmlns:fx="http://javafx.com/fxml" fx:controller="com.example.mophongskype.LoginController">
+    <center>
+        <ScrollPane fitToWidth="true" hbarPolicy="NEVER" vbarPolicy="AS_NEEDED" 
+                   style="-fx-background-color: #f0f0f0; -fx-background: #f0f0f0;">
+            <VBox alignment="CENTER" spacing="20.0" style="-fx-background-color: #f0f0f0;">
+                <padding>
+                    <Insets bottom="40.0" left="40.0" right="40.0" top="40.0"/>
+                </padding>
+                
+                <!-- Header -->
+                <VBox alignment="CENTER" spacing="10.0">
+                    <Text text="Skype" style="-fx-font-size: 32px; -fx-font-weight: bold; -fx-fill: #0078d4;"/>
+                    <Text text="Đăng nhập để bắt đầu chat" style="-fx-font-size: 14px; -fx-fill: #666;"/>
+                </VBox>
+                
+                <!-- Login Form -->
+                <VBox alignment="CENTER" spacing="15.0" style="-fx-background-color: white; -fx-background-radius: 10; -fx-padding: 30; -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.1), 5, 0, 0, 2);">
+                    <VBox spacing="10.0">
+                        <Label text="Tên người dùng:" style="-fx-font-weight: bold; -fx-font-size: 13px;"/>
+                        <TextField fx:id="usernameField" promptText="Nhập tên người dùng" prefWidth="280.0" 
+                                  style="-fx-font-size: 13px; -fx-padding: 8;"/>
+                    </VBox>
+                    
+                    <VBox spacing="10.0">
+                        <Label text="Mật khẩu:" style="-fx-font-weight: bold; -fx-font-size: 13px;"/>
+                        <PasswordField fx:id="passwordField" promptText="Nhập mật khẩu" prefWidth="280.0"
+                                      style="-fx-font-size: 13px; -fx-padding: 8;"/>
+                    </VBox>
+                    
+                    <HBox spacing="10.0" alignment="CENTER">
+                        <Button fx:id="loginButton" text="Đăng nhập" 
+                                style="-fx-background-color: #0078d4; -fx-text-fill: white; -fx-font-weight: bold; -fx-background-radius: 5; -fx-padding: 10 25; -fx-font-size: 13px;"
+                                onAction="#handleLogin"/>
+                        <Button fx:id="registerButton" text="Đăng ký" 
+                                style="-fx-background-color: #107c10; -fx-text-fill: white; -fx-font-weight: bold; -fx-background-radius: 5; -fx-padding: 10 25; -fx-font-size: 13px;"
+                                onAction="#handleRegister"/>
+                    </HBox>
+                    
+                    <Label fx:id="statusLabel" text="" style="-fx-text-fill: red; -fx-font-size: 12px; -fx-wrap-text: true;" 
+                           maxWidth="280.0"/>
+                </VBox>
+                
+                <!-- Tài khoản mẫu -->
+                <VBox alignment="CENTER" spacing="10.0" style="-fx-background-color: #e8f4fd; -fx-background-radius: 8; -fx-padding: 15; -fx-border-color: #0078d4; -fx-border-radius: 8; -fx-border-width: 1;">
+                    <Text text="Tài khoản mẫu để test:" style="-fx-font-weight: bold; -fx-font-size: 12px; -fx-fill: #0078d4;"/>
+                    <VBox spacing="5.0" alignment="CENTER_LEFT">
+                        <Text text="• admin / 123456" style="-fx-font-size: 11px; -fx-fill: #333;"/>
+                        <Text text="• user1 / password" style="-fx-font-size: 11px; -fx-fill: #333;"/>
+                        <Text text="• test / test" style="-fx-font-size: 11px; -fx-fill: #333;"/>
+                    </VBox>
+                </VBox>
+                
+                <!-- Footer -->
+                <VBox alignment="CENTER" spacing="5.0">
+                    <Text text="Phiên bản 1.0 - Mô phỏng Skype" style="-fx-font-size: 10px; -fx-fill: #999;"/>
+                    <Text text="Sử dụng phím Enter để đăng nhập nhanh" style="-fx-font-size: 9px; -fx-fill: #bbb;"/>
+                </VBox>
+            </VBox>
+        </ScrollPane>
+    </center>
+</BorderPane>
