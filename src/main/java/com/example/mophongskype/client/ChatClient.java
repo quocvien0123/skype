@@ -121,20 +121,27 @@ public class ChatClient {
 
     private void listenForMessages() throws IOException {
         String message;
-        while (isConnected && (message = in.readLine()) != null) {
-            // Kiểm tra FILE_DATA trước để xử lý ngay lập tức
-            if (message.startsWith("FILE_DATA:")) {
-                String[] parts = message.split(":");
-                if (parts.length >= 3) {
-                    String fileName = parts[1];
-                    long fileSize = Long.parseLong(parts[2]);
-                    // QUAN TRỌNG: Đọc ngay lập tức để tránh mất dữ liệu
-                    // BufferedReader đã đọc đến newline, binary data bắt đầu ngay sau đó
-                    System.out.println("📥 Bắt đầu nhận file: " + fileName + " (" + fileSize + " bytes)");
-                    receiveFile(fileName, fileSize); // lưu xuống downloads/
+        try {
+            while (isConnected && (message = in.readLine()) != null) {
+                // Kiểm tra FILE_DATA trước để xử lý ngay lập tức
+                if (message.startsWith("FILE_DATA:")) {
+                    String[] parts = message.split(":");
+                    if (parts.length >= 3) {
+                        String fileName = parts[1];
+                        long fileSize = Long.parseLong(parts[2]);
+                        // QUAN TRỌNG: Đọc ngay lập tức để tránh mất dữ liệu
+                        // BufferedReader đã đọc đến newline, binary data bắt đầu ngay sau đó
+                        System.out.println("📥 Bắt đầu nhận file: " + fileName + " (" + fileSize + " bytes)");
+                        receiveFile(fileName, fileSize); // lưu xuống downloads/
+                    }
+                } else {
+                    handleServerMessage(message); // các message khác
                 }
-            } else {
-                handleServerMessage(message); // các message khác
+            }
+        } catch (IOException e) {
+            if (isConnected) {
+                System.err.println("❌ Lỗi khi đọc message: " + e.getMessage());
+                e.printStackTrace();
             }
         }
     }
@@ -307,19 +314,18 @@ public class ChatClient {
             }
             
             // Gửi thông tin file kèm sender qua message callback để UI hiển thị
+            // Đảm bảo gọi callback để hiển thị ảnh trong chat
             if (onMessageReceived != null) {
                 String finalSender = sender;
                 File finalFile = file;
                 Platform.runLater(() -> {
-                    onMessageReceived.accept("FILE_RECEIVED:" + finalSender + ":" + finalFile.getAbsolutePath());
-                });
-            }
-            
-            // Cũng gọi callback onFileReceived nếu có (để tương thích)
-            if (onFileReceived != null) {
-                File finalFile1 = file;
-                Platform.runLater(() -> {
-                    onFileReceived.accept(finalFile1);
+                    try {
+                        // Gửi thông báo file đã nhận để hiển thị trong chat
+                        onMessageReceived.accept("FILE_RECEIVED:" + finalSender + ":" + finalFile.getAbsolutePath());
+                    } catch (Exception e) {
+                        System.err.println("❌ Lỗi khi gọi callback file: " + e.getMessage());
+                        e.printStackTrace();
+                    }
                 });
             }
         } catch (IOException e) {

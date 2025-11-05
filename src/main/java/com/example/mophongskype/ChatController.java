@@ -170,9 +170,30 @@ public class ChatController {
                         String sender = parts[1];
                         String filePath = parts[2];
                         File file = new File(filePath);
-                        boolean isImage = isImageFile(file.getName());
-                        // Hiển thị file trong chat với thông báo "Đã nhận file"
-                        addFileReceivedMessage(sender, file, isImage);
+                        
+                        // Đợi một chút để đảm bảo file đã được ghi hoàn toàn
+                        if (file.exists()) {
+                            boolean isImage = isImageFile(file.getName());
+                            // Hiển thị file trong chat với thông báo "Đã nhận file"
+                            addFileReceivedMessage(sender, file, isImage);
+                        } else {
+                            // Nếu file chưa tồn tại, thử lại sau 100ms
+                            new Thread(() -> {
+                                try {
+                                    Thread.sleep(100);
+                                    Platform.runLater(() -> {
+                                        if (file.exists()) {
+                                            boolean isImage = isImageFile(file.getName());
+                                            addFileReceivedMessage(sender, file, isImage);
+                                        } else {
+                                            System.err.println("⚠️ File không tồn tại: " + filePath);
+                                        }
+                                    });
+                                } catch (InterruptedException e) {
+                                    Thread.currentThread().interrupt();
+                                }
+                            }).start();
+                        }
                     }
                 } else {
                     // Xử lý tin nhắn thường - chỉ hiển thị tin nhắn từ client, không hiển thị SYSTEM và SERVER
@@ -464,17 +485,38 @@ public class ChatController {
         fileBox.getChildren().add(fileLabel);
         
         // Hiển thị preview nếu là ảnh
-        if (isImage && file.exists()) {
+        if (isImage && file.exists() && file.length() > 0) {
             try {
-                ImageView imageView = new ImageView(
-                        new javafx.scene.image.Image(file.toURI().toString(), 200, 0, true, true)
+                // Tạo ImageView với loading error handling
+                javafx.scene.image.Image image = new javafx.scene.image.Image(
+                    file.toURI().toString(), 
+                    200, 0, true, true, true
                 );
+                
+                ImageView imageView = new ImageView(image);
                 imageView.setPreserveRatio(true);
+                imageView.setFitWidth(200);
+                
+                // Xử lý lỗi khi load ảnh
+                image.errorProperty().addListener((obs, wasError, isNowError) -> {
+                    if (isNowError) {
+                        System.err.println("⚠️ Không thể load ảnh: " + file.getName());
+                        Label errorLabel = new Label("⚠️ Không thể hiển thị ảnh");
+                        errorLabel.setStyle("-fx-text-fill: red;");
+                        fileBox.getChildren().add(errorLabel);
+                    }
+                });
+                
                 fileBox.getChildren().add(imageView);
+                System.out.println("✅ Đã hiển thị ảnh: " + file.getName() + " (" + file.length() + " bytes)");
             } catch (Exception e) {
-                System.err.println("Lỗi hiển thị ảnh: " + e.getMessage());
+                System.err.println("❌ Lỗi hiển thị ảnh: " + e.getMessage());
+                e.printStackTrace();
+                Label errorLabel = new Label("⚠️ Lỗi khi hiển thị ảnh: " + e.getMessage());
+                errorLabel.setStyle("-fx-text-fill: red;");
+                fileBox.getChildren().add(errorLabel);
             }
-        } else if (file.exists()) {
+        } else if (file.exists() && file.length() > 0) {
             // Với audio/video: thêm controls
             String lower = file.getName().toLowerCase();
             if (lower.endsWith(".mp3") || lower.endsWith(".wav") || lower.endsWith(".ogg")) {
