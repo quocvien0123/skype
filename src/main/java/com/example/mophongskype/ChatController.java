@@ -175,10 +175,16 @@ public class ChatController {
                         addFileReceivedMessage(sender, file, isImage);
                     }
                 } else {
-                    // Xử lý tin nhắn thường
+                    // Xử lý tin nhắn thường - chỉ hiển thị tin nhắn từ client, không hiển thị SYSTEM và SERVER
                     String[] parts = message.split(":", 2);
                     if (parts.length == 2) {
-                        addMessageToChat(parts[0], parts[1], false);
+                        String sender = parts[0];
+                        String messageText = parts[1];
+                        
+                        // Lọc bỏ tin nhắn từ SYSTEM và SERVER
+                        if (!sender.equals("SYSTEM") && !sender.equals("SERVER")) {
+                            addMessageToChat(sender, messageText, false);
+                        }
                     }
                 }
             });
@@ -243,8 +249,9 @@ public class ChatController {
             addMessageToChat(currentUsername, message, false);
             offlineMessages.add(currentUsername + ": " + message);
         } else if (chatClient != null && chatClient.isConnected()) {
+            // Chỉ gửi lên server, không hiển thị ngay
+            // Tin nhắn sẽ được hiển thị khi nhận từ server (để tránh hiển thị 2 lần)
             chatClient.sendMessage(message);
-            addMessageToChat(currentUsername, message, false);
         }
 
         messageField.clear();
@@ -276,8 +283,9 @@ public class ChatController {
         }
 
         if (chatClient != null && chatClient.isConnected()) {
+            // Chỉ gửi lên server, không hiển thị ngay
+            // Tin nhắn sẽ được hiển thị khi nhận từ server (để tránh hiển thị 2 lần)
             chatClient.sendPrivateMessage(selectedUser, message);
-            addMessageToChat(currentUsername + " → " + selectedUser, message, true);
         }
 
         privateMessageField.clear();

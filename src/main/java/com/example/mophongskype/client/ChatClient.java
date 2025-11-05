@@ -19,6 +19,7 @@ public class ChatClient {
     private String username;
     private InputStream rawInputStream; // InputStream gốc để đọc binary data
     private OutputStream rawOutputStream; // OutputStream gốc để ghi binary data
+    private PushbackInputStream pushbackInputStream; // Để xử lý việc đọc binary sau text
 
     private Consumer<String> onMessageReceived;
     private Consumer<String> onUserListReceived;
@@ -50,8 +51,11 @@ public class ChatClient {
             rawInputStream = socket.getInputStream();
             rawOutputStream = socket.getOutputStream();
             
+            // Dùng PushbackInputStream để có thể pushback bytes đã đọc
+            pushbackInputStream = new PushbackInputStream(rawInputStream, 8192);
+            
             out = new PrintWriter(rawOutputStream, true); // autoFlush = true
-            in = new BufferedReader(new InputStreamReader(rawInputStream));
+            in = new BufferedReader(new InputStreamReader(pushbackInputStream));
             isConnected = true;
 
             // Bắt đầu thread để lắng nghe tin nhắn từ server
@@ -253,20 +257,20 @@ public class ChatClient {
                 counter++;
             }
 
-            // QUAN TRỌNG: Đọc binary data từ rawInputStream (giống hệt như server)
-            // InputStreamReader đã wrap rawInputStream, nhưng khi đọc binary,
-            // chúng ta đọc trực tiếp từ rawInputStream để tránh xử lý text encoding
-            // Code này giống hệt như server để đảm bảo hoạt động đúng
+            // QUAN TRỌNG: Đọc binary data từ pushbackInputStream
+            // InputStreamReader có thể đã đọc trước một số bytes của binary data vào buffer
+            // PushbackInputStream cho phép chúng ta đọc lại những bytes đó
+            // Đọc từ pushbackInputStream (giống như đọc từ rawInputStream nhưng an toàn hơn)
             
             try (FileOutputStream fos = new FileOutputStream(file)) {
-                byte[] buffer = new byte[8192]; // Buffer lớn hơn (giống server)
+                byte[] buffer = new byte[8192]; // Buffer lớn hơn
                 long totalRead = 0;
                 int read;
                 
-                // Đọc đúng số bytes theo fileSize (giống hệt như server - copy từ ClientHandler.receiveFile)
+                // Đọc đúng số bytes theo fileSize
                 while (totalRead < fileSize) {
                     int bytesToRead = (int) Math.min(buffer.length, fileSize - totalRead);
-                    read = rawInputStream.read(buffer, 0, bytesToRead);
+                    read = pushbackInputStream.read(buffer, 0, bytesToRead);
                     
                     if (read == -1) {
                         // Stream kết thúc sớm
@@ -285,7 +289,7 @@ public class ChatClient {
                 }
                 
                 fos.flush(); // Đảm bảo dữ liệu được ghi vào disk
-                fos.getFD().sync(); // Đồng bộ với disk để đảm bảo dữ liệu được ghi hoàn toàn (giống server)
+                fos.getFD().sync(); // Đồng bộ với disk để đảm bảo dữ liệu được ghi hoàn toàn
                 
                 // Kiểm tra xem đã nhận đủ dữ liệu chưa
                 if (totalRead != fileSize) {
