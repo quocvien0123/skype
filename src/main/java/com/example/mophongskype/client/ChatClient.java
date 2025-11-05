@@ -7,7 +7,7 @@ import java.net.*;
 import java.util.function.Consumer;
 
 public class ChatClient {
-    private static final String SERVER_HOST = "localhost";
+    private static final String SERVER_HOST = "192.168.1.175";
     private static final int SERVER_PORT = 12345;
 
     private Socket socket;
@@ -111,20 +111,17 @@ public class ChatClient {
     private void listenForMessages() throws IOException {
         String message;
         while (isConnected && (message = in.readLine()) != null) {
-            System.out.println("📩 Nhận được từ server: " + message);
-
             if (message.startsWith("FILE_DATA:")) {
                 String[] parts = message.split(":");
-                if (parts.length >= 3) {
-                    String fileName = parts[1];
-                    long fileSize = Long.parseLong(parts[2]);
-                    receiveFile(fileName, fileSize);
-                }
+                String fileName = parts[1];
+                long fileSize = Long.parseLong(parts[2]);
+                receiveFile(fileName, fileSize); // lưu xuống downloads/
             } else {
-                handleServerMessage(message);
+                handleServerMessage(message); // các message khác
             }
         }
     }
+
 
 
     private void handleServerMessage(String message) {
@@ -209,8 +206,8 @@ public class ChatClient {
                     totalRead += read;
                 }
             }
-            System.out.println("✅ Đã nhận file: " + fileName);
 
+            System.out.println("✅ File đã tải về: " + file.getAbsolutePath());
             if (onFileReceived != null) {
                 Platform.runLater(() -> onFileReceived.accept(file));
             }
@@ -220,10 +217,14 @@ public class ChatClient {
     }
 
 
+
     // The requestFile method should ask the server to send the file data
     public void requestFile(String fileName) {
-        out.println("REQUEST_FILE:" + fileName);
+        if (isConnected && out != null) {
+            out.println("GET_FILE:" + fileName);
+        }
     }
+
 
     public void sendFile(File file) {
         try {

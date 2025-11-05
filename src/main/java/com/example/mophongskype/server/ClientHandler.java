@@ -118,6 +118,7 @@ public class ClientHandler implements Runnable {
                 }
                 break;
 
+
             default:
                 // Unknown command -> ignore or send back
                 break;
@@ -126,17 +127,17 @@ public class ClientHandler implements Runnable {
 
     private void sendFileToClient(String fileName) {
         try {
-            File file = new File("uploads", fileName);
+            File file = new File("uploads", fileName); // file trên server
             if (!file.exists()) {
                 sendMessage("FILE_NOT_FOUND:" + fileName);
                 return;
             }
 
             long fileSize = file.length();
-            // send header via text channel
+            // Gửi header trước
             sendMessage("FILE_DATA:" + file.getName() + ":" + fileSize);
 
-            // send raw bytes
+            // Gửi dữ liệu file qua socket
             DataOutputStream dos = new DataOutputStream(clientSocket.getOutputStream());
             try (FileInputStream fis = new FileInputStream(file)) {
                 byte[] buffer = new byte[4096];
@@ -148,8 +149,10 @@ public class ClientHandler implements Runnable {
             dos.flush();
         } catch (IOException e) {
             e.printStackTrace();
+            sendMessage("FILE_FAILED:" + fileName);
         }
     }
+
 
     private void receiveFile(String fileName, long fileSize) {
         try {
