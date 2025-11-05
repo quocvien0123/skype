@@ -2,13 +2,15 @@ package com.example.mophongskype.server;
 
 import java.io.*;
 import java.net.*;
+import java.nio.charset.StandardCharsets;
 
 public class ClientHandler implements Runnable {
     private Socket clientSocket;
     private ChatServer server;
     private PrintWriter out;
-    private BufferedReader in;
+    // removed BufferedReader in; use a single buffered input to avoid read-ahead issues
     private InputStream rawInputStream; // InputStream gốc để đọc binary data
+    private BufferedInputStream bufferedIn;
     private OutputStream rawOutputStream; // OutputStream gốc để ghi binary data
     private String username;
 
@@ -22,14 +24,14 @@ public class ClientHandler implements Runnable {
         try {
             // Lưu raw streams để dùng cho binary data
             rawInputStream = clientSocket.getInputStream();
+            bufferedIn = new BufferedInputStream(rawInputStream);
             rawOutputStream = clientSocket.getOutputStream();
             
             // PrintWriter với autoFlush = true để luôn đẩy buffer ra
-            out = new PrintWriter(rawOutputStream, true);
-            in = new BufferedReader(new InputStreamReader(rawInputStream));
+            out = new PrintWriter(new OutputStreamWriter(rawOutputStream, StandardCharsets.UTF_8), true);
 
             String inputLine;
-            while ((inputLine = in.readLine()) != null) {
+            while ((inputLine = readLine(bufferedIn)) != null) {
                 handleMessage(inputLine);
             }
         } catch (IOException e) {
@@ -163,7 +165,7 @@ public class ClientHandler implements Runnable {
      * Gửi file từ server đến client
      * QUAN TRỌNG: Phải flush PrintWriter và đảm bảo không có buffer còn lại
      */
-    private void sendFileToClient(String fileName) {
+    private synchronized void sendFileToClient(String fileName) {
         try {
             File file = new File("uploads", fileName); // file trên server
             if (!file.exists()) {
@@ -218,9 +220,7 @@ public class ClientHandler implements Runnable {
 
             File file = new File(uploadsDir, fileName);
             
-            // Đọc binary data trực tiếp từ raw InputStream
-            // Lưu ý: BufferedReader đã wrap rawInputStream, nhưng khi đọc binary,
-            // chúng ta đọc trực tiếp từ rawInputStream để tránh xử lý text encoding
+            // Đọc binary data trực tiếp từ bufferedIn
             try (FileOutputStream fos = new FileOutputStream(file)) {
                 byte[] buffer = new byte[8192]; // Buffer lớn hơn
                 long totalRead = 0;
@@ -229,8 +229,8 @@ public class ClientHandler implements Runnable {
                 // Đọc đúng số bytes theo fileSize
                 while (totalRead < fileSize) {
                     int bytesToRead = (int) Math.min(buffer.length, fileSize - totalRead);
-                    read = rawInputStream.read(buffer, 0, bytesToRead);
-                    
+                    read = bufferedIn.read(buffer, 0, bytesToRead);
+
                     if (read == -1) {
                         // Stream kết thúc sớm
                         System.err.println("⚠️ Stream kết thúc sớm. Đã đọc " + totalRead + "/" + fileSize + " bytes");
@@ -272,7 +272,7 @@ public class ClientHandler implements Runnable {
     /**
      * Gửi ảnh dưới dạng byte array cho client
      */
-    public void sendImage(String sender, String fileName, byte[] imageBytes) {
+    public synchronized void sendImage(String sender, String fileName, byte[] imageBytes) {
         try {
             // Gửi header trước
             sendMessage("IMAGE_DATA:" + sender + ":" + fileName + ":" + imageBytes.length);
@@ -295,5 +295,44 @@ public class ClientHandler implements Runnable {
             }
             return baos.toByteArray();
         }
+    }
+
+    // Helper to read a line (bytes until '\n') from bufferedIn using UTF-8. Returns null on EOF.
+    private static String readLine(BufferedInputStream bis) throws IOException {
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        int b;
+        boolean seenCR = false;
+        while ((b = bis.read()) != -1) {
+            if (b == '\r') {
+                seenCR = true;
+                continue; // peek for \n next
+            }
+            if (b == '\n') {
+                break;
+            }
+            if (seenCR) {
+                // previous was CR but not followed by LF, we should treat CR as part of line end -> push it
+                baos.write('\r');
+                seenCR = false;
+            }
+            baos.write(b);
+        }
+        if (b == -1 && baos.size() == 0) return null;
+        return new String(baos.toByteArray(), StandardCharsets.UTF_8);
+    }
+
+    // Helper to read exact number of bytes from bufferedIn
+    private static byte[] readFully(BufferedInputStream in, long size) throws IOException {
+        if (size > Integer.MAX_VALUE) throw new IOException("File too large");
+        int remaining = (int) size;
+        byte[] data = new byte[remaining];
+        int offset = 0;
+        while (remaining > 0) {
+            int r = in.read(data, offset, remaining);
+            if (r == -1) throw new EOFException("Stream ended prematurely while reading binary data");
+            offset += r;
+            remaining -= r;
+        }
+        return data;
     }
 }
