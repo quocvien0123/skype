@@ -124,8 +124,9 @@ public class ChatClient {
                 if (parts.length >= 3) {
                     String fileName = parts[1];
                     long fileSize = Long.parseLong(parts[2]);
-                    // QUAN TRỌNG: BufferedReader có thể đã đọc trước một số bytes của binary data
-                    // Cần đọc ngay sau khi đọc text message để tránh mất dữ liệu
+                    // QUAN TRỌNG: Đọc ngay lập tức để tránh mất dữ liệu
+                    // BufferedReader đã đọc đến newline, binary data bắt đầu ngay sau đó
+                    System.out.println("📥 Bắt đầu nhận file: " + fileName + " (" + fileSize + " bytes)");
                     receiveFile(fileName, fileSize); // lưu xuống downloads/
                 }
             } else {
@@ -252,45 +253,44 @@ public class ChatClient {
                 counter++;
             }
 
-            // QUAN TRỌNG: BufferedReader có thể đã đọc trước một số bytes của binary data vào buffer
-            // Cần đọc từ InputStreamReader thông qua một cách đặc biệt
-            // Hoặc đọc trực tiếp từ rawInputStream nhưng cần đảm bảo không có bytes nào bị mất
-            
-            // Đọc binary data trực tiếp từ raw InputStream
-            // Lưu ý: BufferedReader đã wrap rawInputStream, nên khi đọc từ rawInputStream,
-            // chúng ta đang đọc từ cùng một stream, nhưng BufferedReader có thể đã buffer một số bytes
-            // May mắn là BufferedReader chỉ buffer khi cần, và khi đọc readLine(), nó sẽ đọc đến newline
-            // Sau newline, binary data bắt đầu, và chúng ta có thể đọc trực tiếp từ rawInputStream
+            // QUAN TRỌNG: Đọc binary data từ rawInputStream (giống hệt như server)
+            // InputStreamReader đã wrap rawInputStream, nhưng khi đọc binary,
+            // chúng ta đọc trực tiếp từ rawInputStream để tránh xử lý text encoding
+            // Code này giống hệt như server để đảm bảo hoạt động đúng
             
             try (FileOutputStream fos = new FileOutputStream(file)) {
-                byte[] buffer = new byte[8192]; // Buffer lớn hơn
+                byte[] buffer = new byte[8192]; // Buffer lớn hơn (giống server)
                 long totalRead = 0;
                 int read;
                 
-                // Đọc đúng số bytes theo fileSize
-                // Đọc từng chunk để đảm bảo đọc đủ
+                // Đọc đúng số bytes theo fileSize (giống hệt như server - copy từ ClientHandler.receiveFile)
                 while (totalRead < fileSize) {
                     int bytesToRead = (int) Math.min(buffer.length, fileSize - totalRead);
                     read = rawInputStream.read(buffer, 0, bytesToRead);
                     
                     if (read == -1) {
                         // Stream kết thúc sớm
-                        System.err.println("⚠️ Cảnh báo: Stream kết thúc sớm. Đã đọc " + totalRead + "/" + fileSize + " bytes");
+                        System.err.println("⚠️ Stream kết thúc sớm. Đã đọc " + totalRead + "/" + fileSize + " bytes");
                         break;
                     }
                     
                     if (read > 0) {
                         fos.write(buffer, 0, read);
                         totalRead += read;
+                        // Log tiến trình cho file lớn (mỗi 100KB)
+                        if (totalRead % 102400 == 0) {
+                            System.out.println("  Đã đọc: " + (totalRead * 100 / fileSize) + "% (" + totalRead + "/" + fileSize + " bytes)");
+                        }
                     }
                 }
                 
                 fos.flush(); // Đảm bảo dữ liệu được ghi vào disk
-                fos.getFD().sync(); // Đồng bộ với disk để đảm bảo dữ liệu được ghi hoàn toàn
+                fos.getFD().sync(); // Đồng bộ với disk để đảm bảo dữ liệu được ghi hoàn toàn (giống server)
                 
                 // Kiểm tra xem đã nhận đủ dữ liệu chưa
                 if (totalRead != fileSize) {
-                    System.err.println("❌ Cảnh báo: Chỉ nhận được " + totalRead + "/" + fileSize + " bytes cho file " + file.getName());
+                    System.err.println("❌ LỖI: Chỉ nhận được " + totalRead + "/" + fileSize + " bytes cho file " + file.getName());
+                    System.err.println("   Thiếu: " + (fileSize - totalRead) + " bytes");
                 } else {
                     System.out.println("✅ File đã tải về thành công: " + file.getAbsolutePath() + " (" + fileSize + " bytes)");
                 }
