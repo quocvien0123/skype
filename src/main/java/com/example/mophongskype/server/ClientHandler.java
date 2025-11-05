@@ -106,10 +106,22 @@ public class ClientHandler implements Runnable {
                         if (receiveFile(fileName, fileSize)) {
                             // File nhận thành công
                             sendMessage("FILE_RECEIVED:" + fileName);
-                            // Broadcast cho tất cả client khác (trừ người gửi)
-                            server.broadcastNewFile(username, fileName);
-                            // Broadcast tin nhắn thông báo
-                            server.broadcastMessage("SYSTEM", username + " đã gửi " + mediaType + ": " + fileName);
+                            if ("IMAGE".equalsIgnoreCase(mediaType)) {
+                                // Đọc bytes ảnh và broadcast inline cho các client khác
+                                File f = new File("uploads", fileName);
+                                try {
+                                    byte[] imageBytes = readFileToBytes(f);
+                                    server.broadcastImage(username, fileName, imageBytes);
+                                } catch (IOException ex) {
+                                    System.err.println("Lỗi đọc bytes ảnh: " + ex.getMessage());
+                                }
+                                // Tùy chọn: vẫn có thể gửi SYSTEM thông báo
+                                server.broadcastMessage("SYSTEM", username + " đã gửi IMAGE: " + fileName);
+                            } else {
+                                // non-image media: giữ nguyên hành vi - để client tự tải
+                                server.broadcastNewFile(username, fileName);
+                                server.broadcastMessage("SYSTEM", username + " đã gửi " + mediaType + ": " + fileName);
+                            }
                         } else {
                             sendMessage("FILE_FAILED:" + fileName);
                         }
@@ -170,8 +182,8 @@ public class ClientHandler implements Runnable {
             sendMessage("FILE_DATA:" + file.getName() + ":" + fileSize);
             
             // Đợi một chút để đảm bảo text message được gửi hoàn toàn
-            Thread.sleep(100);
-            
+            try { Thread.sleep(100); } catch (InterruptedException ignored) {}
+
             // Gửi dữ liệu file BINARY trực tiếp qua raw OutputStream
             // KHÔNG dùng DataOutputStream wrap lại vì sẽ conflict với PrintWriter
             try (FileInputStream fis = new FileInputStream(file)) {
@@ -185,7 +197,7 @@ public class ClientHandler implements Runnable {
                 rawOutputStream.flush(); // Flush để đảm bảo dữ liệu được gửi
                 System.out.println("✅ Đã gửi file " + fileName + " (" + totalSent + "/" + fileSize + " bytes) đến " + username);
             }
-        } catch (IOException | InterruptedException e) {
+        } catch (IOException e) {
             e.printStackTrace();
             sendMessage("FILE_FAILED:" + fileName);
         }
@@ -255,6 +267,33 @@ public class ClientHandler implements Runnable {
         if (out != null) {
             out.println(message);
             // out.flush(); // autoFlush = true nên không bắt buộc, nhưng giữ nếu muốn
+        }
+    }
+    /**
+     * Gửi ảnh dưới dạng byte array cho client
+     */
+    public void sendImage(String sender, String fileName, byte[] imageBytes) {
+        try {
+            // Gửi header trước
+            sendMessage("IMAGE_DATA:" + sender + ":" + fileName + ":" + imageBytes.length);
+
+            // Gửi dữ liệu ảnh
+            rawOutputStream.write(imageBytes);
+            rawOutputStream.flush();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    // Helper: đọc toàn bộ file thành byte[]
+    private byte[] readFileToBytes(File file) throws IOException {
+        try (InputStream is = new FileInputStream(file); ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
+            byte[] buf = new byte[8192];
+            int r;
+            while ((r = is.read(buf)) != -1) {
+                baos.write(buf, 0, r);
+            }
+            return baos.toByteArray();
         }
     }
 }

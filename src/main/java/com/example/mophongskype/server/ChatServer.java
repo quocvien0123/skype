@@ -112,17 +112,30 @@ public class ChatServer {
     }
 
     /**
-     * Broadcast thông báo file mới cho tất cả client (trừ người gửi)
+     * Broadcast ảnh inline tới tất cả client (trừ người gửi)
+     * Format header do ClientHandler đảm nhiệm: IMAGE_DATA:sender:fileName:size + [bytes]
+     */
+    public synchronized void broadcastImage(String sender, String fileName, byte[] imageBytes) {
+        for (Map.Entry<String, ClientHandler> entry : connectedClients.entrySet()) {
+            if (!entry.getKey().equals(sender)) {
+                entry.getValue().sendImage(sender, fileName, imageBytes);
+            }
+        }
+    }
+
+    /**
+     * Broadcast thông báo file mới (để các client tự GET_FILE về)
      * Format: NEW_FILE:sender:fileName
      */
     public synchronized void broadcastNewFile(String sender, String fileName) {
         for (Map.Entry<String, ClientHandler> entry : connectedClients.entrySet()) {
             if (!entry.getKey().equals(sender)) {
-                // Gửi thông báo file mới kèm tên người gửi
                 entry.getValue().sendMessage("NEW_FILE:" + sender + ":" + fileName);
             }
         }
     }
+
+
 
     public static void main(String[] args) {
         ChatServer server = new ChatServer();

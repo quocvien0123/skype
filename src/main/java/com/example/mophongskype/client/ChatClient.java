@@ -28,6 +28,21 @@ public class ChatClient {
     private Consumer<String> onPrivateMessageReceived;
     private Consumer<String> onRemoved;
 
+    // New callback for inline images
+    public static class ImageMessage {
+        public final String sender;
+        public final String fileName;
+        public final byte[] bytes;
+
+        public ImageMessage(String sender, String fileName, byte[] bytes) {
+            this.sender = sender;
+            this.fileName = fileName;
+            this.bytes = bytes;
+        }
+    }
+
+    private Consumer<ImageMessage> onImageReceived;
+
     private String currentRoom;
     
     // Map để lưu tên người gửi cho mỗi file đang được tải
@@ -123,6 +138,24 @@ public class ChatClient {
         String message;
         try {
             while (isConnected && (message = in.readLine()) != null) {
+                // Handle inline image header
+                if (message.startsWith("IMAGE_DATA:")) {
+                    String[] parts = message.split(":", 4);
+                    if (parts.length >= 4) {
+                        String sender = parts[1];
+                        String fileName = parts[2];
+                        long fileSize = Long.parseLong(parts[3]);
+                        System.out.println("📥 Bắt đầu nhận ảnh inline: " + fileName + " (" + fileSize + " bytes) từ " + sender);
+                        byte[] imageBytes = readFully(pushbackInputStream, fileSize);
+                        if (onImageReceived != null) {
+                            ImageMessage im = new ImageMessage(sender, fileName, imageBytes);
+                            // Ensure UI update on JavaFX thread
+                            Platform.runLater(() -> onImageReceived.accept(im));
+                        }
+                        continue;
+                    }
+                }
+
                 // Kiểm tra FILE_DATA trước để xử lý ngay lập tức
                 if (message.startsWith("FILE_DATA:")) {
                     String[] parts = message.split(":");
@@ -447,11 +480,31 @@ public class ChatClient {
         this.onRemoved = callback;
     }
 
+    // New setter for image callback
+    public void setOnImageReceived(Consumer<ImageMessage> callback) {
+        this.onImageReceived = callback;
+    }
+
     public boolean isConnected() {
         return isConnected;
     }
 
     public String getUsername() {
         return username;
+    }
+
+    // Helper to read exact number of bytes from InputStream
+    private static byte[] readFully(InputStream in, long size) throws IOException {
+        if (size > Integer.MAX_VALUE) throw new IOException("File too large");
+        int remaining = (int) size;
+        byte[] data = new byte[remaining];
+        int offset = 0;
+        while (remaining > 0) {
+            int r = in.read(data, offset, remaining);
+            if (r == -1) throw new EOFException("Stream ended prematurely while reading binary data");
+            offset += r;
+            remaining -= r;
+        }
+        return data;
     }
 }

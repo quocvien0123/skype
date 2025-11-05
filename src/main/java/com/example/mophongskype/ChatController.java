@@ -24,6 +24,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import javafx.application.HostServices;
+import javafx.scene.image.Image;
 
 import static java.lang.System.out;
 
@@ -138,6 +139,11 @@ public class ChatController {
         this.chatClient = client;
         this.currentUsername = client.getUsername();
         setupClientCallbacks();
+
+        // Register image callback so inline images are shown without needing downloads
+        this.chatClient.setOnImageReceived(im -> {
+            Platform.runLater(() -> addInlineImageMessage(im.sender, im.fileName, im.bytes));
+        });
     }
 
     public void setOfflineMode(String username) {
@@ -202,7 +208,7 @@ public class ChatController {
                         String sender = parts[0];
                         String messageText = parts[1];
                         
-                        // Lọc bỏ tin nhắn từ SYSTEM và SERVER
+                        // Lọc bỏ tin nhắn từSYSTEM và SERVER
                         if (!sender.equals("SYSTEM") && !sender.equals("SERVER")) {
                             addMessageToChat(sender, messageText, false);
                         }
@@ -393,9 +399,8 @@ public class ChatController {
 
         if (file != null) {
             if (chatClient != null && chatClient.isConnected()) {
-                chatClient.sendFile(file);
-
-                // Hiển thị ngay trong chat
+                // Do addFileMessageToChat handles the actual sending (and chooses media vs file),
+                // we only need to display and let that method send.
                 addFileMessageToChat(currentUsername, file);
             } else {
                 showAlert("Lỗi: Chưa kết nối server");
@@ -416,9 +421,9 @@ public class ChatController {
         fileBox.getChildren().add(senderLabel);
 
         if (isImageFile(file.getName())) {
-            // Gửi file ảnh (lưu trong uploads trên server)
+            // Gửi file ảnh (lưu trong uploads trên server) - use SEND_MEDIA:IMAGE so server broadcasts inline bytes
             if (chatClient != null && chatClient.isConnected()) {
-                chatClient.sendFile(file);
+                chatClient.sendMediaFile(file, "IMAGE");
             }
             javafx.scene.image.ImageView imageView = new javafx.scene.image.ImageView(
                     new javafx.scene.image.Image(file.toURI().toString(), 200, 0, true, true)
@@ -550,6 +555,53 @@ public class ChatController {
             }
         }
         
+        chatContainer.getChildren().add(fileBox);
+        scrollToBottom();
+    }
+
+    // New method: add inline image message from bytes (no disk save required)
+    private void addInlineImageMessage(String sender, String fileName, byte[] bytes) {
+        String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"));
+
+        VBox fileBox = new VBox();
+        fileBox.setSpacing(5);
+        fileBox.setStyle("-fx-background-color: #e8f5e9; -fx-background-radius: 8; -fx-padding: 8; -fx-border-color: #4caf50; -fx-border-radius: 8; -fx-border-width: 1;");
+
+        HBox headerBox = new HBox();
+        headerBox.setSpacing(5);
+
+        Text timeText = new Text("[" + timestamp + "]");
+        timeText.setStyle("-fx-fill: #666; -fx-font-size: 10px;");
+
+        Text senderText = new Text(sender + " đã gửi ảnh:");
+        senderText.setStyle("-fx-fill: #2e7d32; -fx-font-weight: bold; -fx-font-size: 12px;");
+
+        headerBox.getChildren().addAll(timeText, senderText);
+
+        fileBox.getChildren().add(headerBox);
+
+        try {
+            InputStream is = new ByteArrayInputStream(bytes);
+            Image image = new Image(is, 200, 0, true, true);
+            ImageView imageView = new ImageView(image);
+            imageView.setPreserveRatio(true);
+            imageView.setFitWidth(200);
+
+            image.errorProperty().addListener((obs, wasErr, isNowErr) -> {
+                if (isNowErr) {
+                    Label err = new Label("⚠️ Không thể hiển thị ảnh: " + fileName);
+                    err.setStyle("-fx-text-fill: red;");
+                    fileBox.getChildren().add(err);
+                }
+            });
+
+            fileBox.getChildren().addAll(new Label("📷 " + fileName), imageView);
+        } catch (Exception e) {
+            Label err = new Label("⚠️ Lỗi khi hiển thị ảnh: " + e.getMessage());
+            err.setStyle("-fx-text-fill: red;");
+            fileBox.getChildren().add(err);
+        }
+
         chatContainer.getChildren().add(fileBox);
         scrollToBottom();
     }
