@@ -11,6 +11,7 @@ module com.example.mophongskype {
     requires eu.hansolo.tilesfx;
     requires com.almasb.fxgl.all;
     requires java.desktop;
+    requires javafx.media;
 
     opens com.example.mophongskype to javafx.fxml;
     exports com.example.mophongskype;

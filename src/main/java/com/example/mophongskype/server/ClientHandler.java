@@ -18,6 +18,7 @@ public class ClientHandler implements Runnable {
     @Override
     public void run() {
         try {
+            // PrintWriter với autoFlush = true để luôn đẩy buffer ra
             out = new PrintWriter(clientSocket.getOutputStream(), true);
             in = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
 
@@ -40,7 +41,7 @@ public class ClientHandler implements Runnable {
     }
 
     private void handleMessage(String message) {
-        String[] parts = message.split(":", 4); // có thể có filename + filesize
+        String[] parts = message.split(":", 4); // mở rộng để chứa filename + filesize
         String command = parts[0];
 
         switch (command) {
@@ -61,6 +62,7 @@ public class ClientHandler implements Runnable {
 
             case "MESSAGE":
                 if (parts.length >= 2 && username != null) {
+                    // parts[1] chứa toàn bộ message (vì split limit 4)
                     server.broadcastMessage(username, parts[1]);
                 }
                 break;
@@ -74,15 +76,26 @@ public class ClientHandler implements Runnable {
                 break;
 
             case "SEND_FILE":
-                if (parts.length >= 3) {
-                    String fileName = parts[1];
-                    long fileSize = Long.parseLong(parts[2]);
-                    receiveFile(fileName, fileSize);
-                    // báo cho tất cả user khác biết có file mới
-                    server.broadcastMessage("SYSTEM", "Người dùng " + username + " đã gửi file: " + fileName);
+            case "SEND_MEDIA":
+                // Format SEND_FILE:filename:filesize
+                // Format SEND_MEDIA:TYPE:filename:filesize  (TYPE=AUDIO|VIDEO|IMAGE)
+                try {
+                    if (command.equals("SEND_FILE") && parts.length >= 3) {
+                        String fileName = parts[1];
+                        long fileSize = Long.parseLong(parts[2]);
+                        receiveFile(fileName, fileSize);
+                        server.broadcastMessage("SYSTEM", username + " đã gửi file: " + fileName);
+                    } else if (command.equals("SEND_MEDIA") && parts.length >= 4) {
+                        String mediaType = parts[1]; // e.g. AUDIO or VIDEO or IMAGE
+                        String fileName = parts[2];
+                        long fileSize = Long.parseLong(parts[3]);
+                        receiveFile(fileName, fileSize);
+                        server.broadcastMessage("SYSTEM", username + " đã gửi " + mediaType + ": " + fileName);
+                    }
+                } catch (NumberFormatException e) {
+                    sendMessage("FILE_FAILED:Sai định dạng filesize");
                 }
                 break;
-
 
             case "LOGOUT":
                 if (username != null) {
@@ -97,6 +110,7 @@ public class ClientHandler implements Runnable {
                     server.removeUser(userToRemove);
                 }
                 break;
+
             case "GET_FILE":
                 if (parts.length >= 2) {
                     String fileName = parts[1];
@@ -104,8 +118,12 @@ public class ClientHandler implements Runnable {
                 }
                 break;
 
+            default:
+                // Unknown command -> ignore or send back
+                break;
         }
     }
+
     private void sendFileToClient(String fileName) {
         try {
             File file = new File("uploads", fileName);
@@ -115,11 +133,10 @@ public class ClientHandler implements Runnable {
             }
 
             long fileSize = file.length();
-
-            // báo header trước qua out
+            // send header via text channel
             sendMessage("FILE_DATA:" + file.getName() + ":" + fileSize);
 
-            // gửi dữ liệu thô
+            // send raw bytes
             DataOutputStream dos = new DataOutputStream(clientSocket.getOutputStream());
             try (FileInputStream fis = new FileInputStream(file)) {
                 byte[] buffer = new byte[4096];
@@ -134,7 +151,6 @@ public class ClientHandler implements Runnable {
         }
     }
 
-
     private void receiveFile(String fileName, long fileSize) {
         try {
             File uploadsDir = new File("uploads");
@@ -142,18 +158,17 @@ public class ClientHandler implements Runnable {
 
             File file = new File(uploadsDir, fileName);
             DataInputStream dataIn = new DataInputStream(clientSocket.getInputStream());
-            FileOutputStream fos = new FileOutputStream(file);
-
-            byte[] buffer = new byte[4096];
-            long totalRead = 0;
-            int read;
-            while (totalRead < fileSize && (read = dataIn.read(buffer, 0, (int) Math.min(buffer.length, fileSize - totalRead))) != -1) {
-                fos.write(buffer, 0, read);
-                totalRead += read;
+            try (FileOutputStream fos = new FileOutputStream(file)) {
+                byte[] buffer = new byte[4096];
+                long totalRead = 0;
+                int read;
+                while (totalRead < fileSize && (read = dataIn.read(buffer, 0, (int) Math.min(buffer.length, fileSize - totalRead))) != -1) {
+                    fos.write(buffer, 0, read);
+                    totalRead += read;
+                }
             }
 
-            fos.close();
-            System.out.println("Đã nhận file: " + fileName);
+            System.out.println("Đã nhận file: " + fileName + " từ " + username);
             sendMessage("FILE_RECEIVED:" + fileName);
         } catch (IOException e) {
             System.err.println("Lỗi nhận file: " + e.getMessage());
@@ -161,9 +176,11 @@ public class ClientHandler implements Runnable {
         }
     }
 
-    public void sendMessage(String message) {
+    // Gửi text message cho client (luôn println + autoFlush)
+    public synchronized void sendMessage(String message) {
         if (out != null) {
             out.println(message);
+            // out.flush(); // autoFlush = true nên không bắt buộc, nhưng giữ nếu muốn
         }
     }
 }

@@ -15,6 +15,8 @@ public class ChatClient {
     private BufferedReader in;
     private boolean isConnected = false;
     private String username;
+    private DataInputStream dis;
+    private DataOutputStream dos;
 
     private Consumer<String> onMessageReceived;
     private Consumer<String> onUserListReceived;
@@ -23,10 +25,11 @@ public class ChatClient {
     private Consumer<String> onPrivateMessageReceived;
     private Consumer<String> onRemoved;
 
+    private String currentRoom;
+
     public ChatClient() {
         // Constructor
     }
-    private String currentRoom;
 
     public void joinRoom(String roomId) {
         if (out != null && isConnected) {
@@ -35,16 +38,24 @@ public class ChatClient {
         }
     }
 
-
     public boolean connect() {
         try {
             socket = new Socket(SERVER_HOST, SERVER_PORT);
-            out = new PrintWriter(socket.getOutputStream(), true);
+            dis = new DataInputStream(socket.getInputStream());
+            dos = new DataOutputStream(socket.getOutputStream());
+            out = new PrintWriter(socket.getOutputStream(), true); // autoFlush = true
             in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
             isConnected = true;
 
             // Bắt đầu thread để lắng nghe tin nhắn từ server
-            new Thread(this::listenForMessages).start();
+            new Thread(() -> {
+                try {
+                    listenForMessages();
+                } catch (IOException e) {
+                    System.err.println("Error while listening for messages: " + e.getMessage());
+                    if (isConnected) disconnect();
+                }
+            }).start();
             return true;
         } catch (IOException e) {
             System.err.println("Không thể kết nối đến server: " + e.getMessage());
@@ -97,18 +108,24 @@ public class ChatClient {
         }
     }
 
-    private void listenForMessages() {
-        try {
-            String message;
-            while (isConnected && (message = in.readLine()) != null) {
+    private void listenForMessages() throws IOException {
+        String message;
+        while (isConnected && (message = in.readLine()) != null) {
+            System.out.println("📩 Nhận được từ server: " + message);
+
+            if (message.startsWith("FILE_DATA:")) {
+                String[] parts = message.split(":");
+                if (parts.length >= 3) {
+                    String fileName = parts[1];
+                    long fileSize = Long.parseLong(parts[2]);
+                    receiveFile(fileName, fileSize);
+                }
+            } else {
                 handleServerMessage(message);
-            }
-        } catch (IOException e) {
-            if (isConnected) {
-                System.err.println("Lỗi nhận tin nhắn: " + e.getMessage());
             }
         }
     }
+
 
     private void handleServerMessage(String message) {
         String[] parts = message.split(":", 3);
@@ -143,48 +160,35 @@ public class ChatClient {
             case "REMOVED":
                 if (onRemoved != null) onRemoved.accept("Bạn đã bị xóa khỏi danh sách");
                 break;
-
-            case "FILE_RECEIVED": // server báo đã nhận file
+            case "FILE_RECEIVED":
                 if (parts.length >= 2 && onMessageReceived != null) {
                     onMessageReceived.accept("SERVER: Đã nhận file " + parts[1]);
                 }
                 break;
-
-            case "FILE_FAILED": // server báo lỗi khi nhận file
+            case "FILE_FAILED":
                 if (parts.length >= 2 && onMessageReceived != null) {
                     onMessageReceived.accept("SERVER: Lỗi khi nhận file " + parts[1]);
                 }
                 break;
-
-            case "FILE_DATA": // server bắt đầu gửi file
+            case "FILE_DATA":
                 if (parts.length >= 3) {
                     String fileName = parts[1];
                     long fileSize = Long.parseLong(parts[2]);
                     receiveFile(fileName, fileSize);
                 }
                 break;
-            case "IMAGE_FILE":
+            // In ChatClient.java (handle server message)
+            case "NEW_FILE":
                 if (parts.length >= 2) {
                     String fileName = parts[1];
-                    File file = new File("downloads/" + fileName);
-
-                    if (!file.exists()) {
-                        requestFile(fileName);
-                    } else if (onFileReceived != null) {
-                        Platform.runLater(() -> onFileReceived.accept(file));
-                    }
-                }
-                break;
-            case "FILE_SAVED": // server báo file đã gửi xong
-                if (parts.length >= 3 && onFileReceived != null) {
-                    File file = new File(parts[1]);
-                    boolean isImage = "IMAGE".equals(parts[2]);
-                    File finalFile = file;
-                    Platform.runLater(() -> onFileReceived.accept(finalFile));
+                    // Request the file from the server
+                    requestFile(fileName);
                 }
                 break;
 
-
+            default:
+                // có thể có các lệnh khác
+                break;
         }
     }
 
@@ -195,32 +199,30 @@ public class ChatClient {
 
             File file = new File(downloadsDir, fileName);
             DataInputStream dis = new DataInputStream(socket.getInputStream());
-            FileOutputStream fos = new FileOutputStream(file);
-
-            byte[] buffer = new byte[4096];
-            long totalRead = 0;
-            int read;
-            while (totalRead < fileSize &&
-                    (read = dis.read(buffer, 0, (int) Math.min(buffer.length, fileSize - totalRead))) != -1) {
-                fos.write(buffer, 0, read);
-                totalRead += read;
+            try (FileOutputStream fos = new FileOutputStream(file)) {
+                byte[] buffer = new byte[4096];
+                long totalRead = 0;
+                int read;
+                while (totalRead < fileSize &&
+                        (read = dis.read(buffer, 0, (int) Math.min(buffer.length, fileSize - totalRead))) != -1) {
+                    fos.write(buffer, 0, read);
+                    totalRead += read;
+                }
             }
-            fos.close();
+            System.out.println("✅ Đã nhận file: " + fileName);
 
             if (onFileReceived != null) {
                 Platform.runLater(() -> onFileReceived.accept(file));
             }
-
-
         } catch (IOException e) {
             e.printStackTrace();
         }
     }
 
+
+    // The requestFile method should ask the server to send the file data
     public void requestFile(String fileName) {
-        if (socket != null && socket.isConnected()) {
-            out.println("GET_FILE:" + fileName);
-        }
+        out.println("REQUEST_FILE:" + fileName);
     }
 
     public void sendFile(File file) {
@@ -230,31 +232,48 @@ public class ChatClient {
                 // Gửi header
                 out.println("SEND_FILE:" + file.getName() + ":" + fileSize);
 
-                // Gửi dữ liệu file
+                // Gửi dữ liệu file (dùng raw OutputStream)
                 DataOutputStream dos = new DataOutputStream(socket.getOutputStream());
-                FileInputStream fis = new FileInputStream(file);
-
-                byte[] buffer = new byte[4096];
-                int read;
-                while ((read = fis.read(buffer)) != -1) {
-                    dos.write(buffer, 0, read);
+                try (FileInputStream fis = new FileInputStream(file)) {
+                    byte[] buffer = new byte[4096];
+                    int read;
+                    while ((read = fis.read(buffer)) != -1) {
+                        dos.write(buffer, 0, read);
+                    }
                 }
                 dos.flush();
-                fis.close();
             }
         } catch (IOException e) {
             e.printStackTrace();
         }
     }
 
+    public void sendMediaFile(File file, String type) {
+        try {
+            if (socket != null && socket.isConnected()) {
+                long fileSize = file.length();
+                // SEND_MEDIA:TYPE:filename:filesize
+                out.println("SEND_MEDIA:" + type + ":" + file.getName() + ":" + fileSize);
 
-
-
+                DataOutputStream dos = new DataOutputStream(socket.getOutputStream());
+                try (FileInputStream fis = new FileInputStream(file)) {
+                    byte[] buffer = new byte[4096];
+                    int read;
+                    while ((read = fis.read(buffer)) != -1) {
+                        dos.write(buffer, 0, read);
+                    }
+                }
+                dos.flush();
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
 
     // Getters và Setters cho callbacks
-    private Consumer<File> onFileReceived;
+    private java.util.function.Consumer<File> onFileReceived;
 
-    public void setOnFileReceived(Consumer<File> callback) {
+    public void setOnFileReceived(java.util.function.Consumer<File> callback) {
         this.onFileReceived = callback;
     }
 
