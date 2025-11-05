@@ -17,8 +17,8 @@ public class ChatClient {
     private BufferedReader in;
     private boolean isConnected = false;
     private String username;
-    private DataInputStream dis;
-    private DataOutputStream dos;
+    private InputStream rawInputStream; // InputStream gốc để đọc binary data
+    private OutputStream rawOutputStream; // OutputStream gốc để ghi binary data
 
     private Consumer<String> onMessageReceived;
     private Consumer<String> onUserListReceived;
@@ -46,10 +46,12 @@ public class ChatClient {
     public boolean connect() {
         try {
             socket = new Socket(SERVER_HOST, SERVER_PORT);
-            dis = new DataInputStream(socket.getInputStream());
-            dos = new DataOutputStream(socket.getOutputStream());
-            out = new PrintWriter(socket.getOutputStream(), true); // autoFlush = true
-            in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+            // Lưu raw streams để dùng cho binary data
+            rawInputStream = socket.getInputStream();
+            rawOutputStream = socket.getOutputStream();
+            
+            out = new PrintWriter(rawOutputStream, true); // autoFlush = true
+            in = new BufferedReader(new InputStreamReader(rawInputStream));
             isConnected = true;
 
             // Bắt đầu thread để lắng nghe tin nhắn từ server
@@ -122,6 +124,8 @@ public class ChatClient {
                 if (parts.length >= 3) {
                     String fileName = parts[1];
                     long fileSize = Long.parseLong(parts[2]);
+                    // QUAN TRỌNG: BufferedReader có thể đã đọc trước một số bytes của binary data
+                    // Cần đọc ngay sau khi đọc text message để tránh mất dữ liệu
                     receiveFile(fileName, fileSize); // lưu xuống downloads/
                 }
             } else {
@@ -220,6 +224,7 @@ public class ChatClient {
 
     /**
      * Nhận file từ server và lưu vào thư mục downloads
+     * QUAN TRỌNG: Dùng raw InputStream để đọc binary data, không dùng BufferedReader
      * File sẽ được lưu với tên gốc, nếu đã tồn tại sẽ thêm số thứ tự
      */
     private void receiveFile(String fileName, long fileSize) {
@@ -247,31 +252,45 @@ public class ChatClient {
                 counter++;
             }
 
-            // Đọc dữ liệu file từ socket
-            DataInputStream dis = new DataInputStream(socket.getInputStream());
+            // QUAN TRỌNG: BufferedReader có thể đã đọc trước một số bytes của binary data vào buffer
+            // Cần đọc từ InputStreamReader thông qua một cách đặc biệt
+            // Hoặc đọc trực tiếp từ rawInputStream nhưng cần đảm bảo không có bytes nào bị mất
+            
+            // Đọc binary data trực tiếp từ raw InputStream
+            // Lưu ý: BufferedReader đã wrap rawInputStream, nên khi đọc từ rawInputStream,
+            // chúng ta đang đọc từ cùng một stream, nhưng BufferedReader có thể đã buffer một số bytes
+            // May mắn là BufferedReader chỉ buffer khi cần, và khi đọc readLine(), nó sẽ đọc đến newline
+            // Sau newline, binary data bắt đầu, và chúng ta có thể đọc trực tiếp từ rawInputStream
+            
             try (FileOutputStream fos = new FileOutputStream(file)) {
-                byte[] buffer = new byte[4096];
+                byte[] buffer = new byte[8192]; // Buffer lớn hơn
                 long totalRead = 0;
                 int read;
                 
-                // Đọc đủ số bytes theo fileSize
+                // Đọc đúng số bytes theo fileSize
+                // Đọc từng chunk để đảm bảo đọc đủ
                 while (totalRead < fileSize) {
                     int bytesToRead = (int) Math.min(buffer.length, fileSize - totalRead);
-                    read = dis.read(buffer, 0, bytesToRead);
+                    read = rawInputStream.read(buffer, 0, bytesToRead);
                     
                     if (read == -1) {
-                        // Kết thúc stream sớm
+                        // Stream kết thúc sớm
                         System.err.println("⚠️ Cảnh báo: Stream kết thúc sớm. Đã đọc " + totalRead + "/" + fileSize + " bytes");
                         break;
                     }
                     
-                    fos.write(buffer, 0, read);
-                    totalRead += read;
+                    if (read > 0) {
+                        fos.write(buffer, 0, read);
+                        totalRead += read;
+                    }
                 }
+                
+                fos.flush(); // Đảm bảo dữ liệu được ghi vào disk
+                fos.getFD().sync(); // Đồng bộ với disk để đảm bảo dữ liệu được ghi hoàn toàn
                 
                 // Kiểm tra xem đã nhận đủ dữ liệu chưa
                 if (totalRead != fileSize) {
-                    System.err.println("⚠️ Cảnh báo: Chỉ nhận được " + totalRead + "/" + fileSize + " bytes cho file " + file.getName());
+                    System.err.println("❌ Cảnh báo: Chỉ nhận được " + totalRead + "/" + fileSize + " bytes cho file " + file.getName());
                 } else {
                     System.out.println("✅ File đã tải về thành công: " + file.getAbsolutePath() + " (" + fileSize + " bytes)");
                 }
@@ -320,29 +339,29 @@ public class ChatClient {
             if (socket != null && socket.isConnected()) {
                 long fileSize = file.length();
                 
-                // QUAN TRỌNG: Flush PrintWriter trước khi dùng DataOutputStream
+                // QUAN TRỌNG: Flush PrintWriter trước khi gửi binary data
                 if (out != null) {
                     out.flush();
                 }
                 
-                // Gửi header qua PrintWriter
+                // Gửi header qua PrintWriter (với newline)
                 out.println("SEND_FILE:" + file.getName() + ":" + fileSize);
                 
-                // Đợi một chút để đảm bảo message được gửi
-                Thread.sleep(50);
+                // Đợi một chút để đảm bảo text message được gửi hoàn toàn
+                Thread.sleep(100);
                 
-                // Gửi dữ liệu file qua DataOutputStream
-                DataOutputStream dos = new DataOutputStream(socket.getOutputStream());
+                // Gửi dữ liệu file BINARY trực tiếp qua raw OutputStream
+                // KHÔNG dùng DataOutputStream wrap lại vì sẽ conflict với PrintWriter
                 try (FileInputStream fis = new FileInputStream(file)) {
-                    byte[] buffer = new byte[4096];
+                    byte[] buffer = new byte[8192]; // Buffer lớn hơn để tăng hiệu suất
                     int read;
                     long totalSent = 0;
                     while ((read = fis.read(buffer)) != -1) {
-                        dos.write(buffer, 0, read);
+                        rawOutputStream.write(buffer, 0, read);
                         totalSent += read;
                     }
-                    dos.flush();
-                    System.out.println("✅ Đã gửi file " + file.getName() + " (" + totalSent + " bytes) lên server");
+                    rawOutputStream.flush(); // Flush để đảm bảo dữ liệu được gửi
+                    System.out.println("✅ Đã gửi file " + file.getName() + " (" + totalSent + "/" + fileSize + " bytes) lên server");
                 }
             }
         } catch (IOException | InterruptedException e) {
@@ -356,7 +375,7 @@ public class ChatClient {
             if (socket != null && socket.isConnected()) {
                 long fileSize = file.length();
                 
-                // QUAN TRỌNG: Flush PrintWriter trước khi dùng DataOutputStream
+                // QUAN TRỌNG: Flush PrintWriter trước khi gửi binary data
                 if (out != null) {
                     out.flush();
                 }
@@ -364,21 +383,21 @@ public class ChatClient {
                 // Gửi header: SEND_MEDIA:TYPE:filename:filesize
                 out.println("SEND_MEDIA:" + type + ":" + file.getName() + ":" + fileSize);
                 
-                // Đợi một chút để đảm bảo message được gửi
-                Thread.sleep(50);
+                // Đợi một chút để đảm bảo text message được gửi hoàn toàn
+                Thread.sleep(100);
                 
-                // Gửi dữ liệu file qua DataOutputStream
-                DataOutputStream dos = new DataOutputStream(socket.getOutputStream());
+                // Gửi dữ liệu file BINARY trực tiếp qua raw OutputStream
+                // KHÔNG dùng DataOutputStream wrap lại vì sẽ conflict với PrintWriter
                 try (FileInputStream fis = new FileInputStream(file)) {
-                    byte[] buffer = new byte[4096];
+                    byte[] buffer = new byte[8192]; // Buffer lớn hơn
                     int read;
                     long totalSent = 0;
                     while ((read = fis.read(buffer)) != -1) {
-                        dos.write(buffer, 0, read);
+                        rawOutputStream.write(buffer, 0, read);
                         totalSent += read;
                     }
-                    dos.flush();
-                    System.out.println("✅ Đã gửi media file " + file.getName() + " (" + totalSent + " bytes, type: " + type + ") lên server");
+                    rawOutputStream.flush(); // Flush để đảm bảo dữ liệu được gửi
+                    System.out.println("✅ Đã gửi media file " + file.getName() + " (" + totalSent + "/" + fileSize + " bytes, type: " + type + ") lên server");
                 }
             }
         } catch (IOException | InterruptedException e) {

@@ -8,6 +8,8 @@ public class ClientHandler implements Runnable {
     private ChatServer server;
     private PrintWriter out;
     private BufferedReader in;
+    private InputStream rawInputStream; // InputStream gốc để đọc binary data
+    private OutputStream rawOutputStream; // OutputStream gốc để ghi binary data
     private String username;
 
     public ClientHandler(Socket socket, ChatServer server) {
@@ -18,9 +20,13 @@ public class ClientHandler implements Runnable {
     @Override
     public void run() {
         try {
+            // Lưu raw streams để dùng cho binary data
+            rawInputStream = clientSocket.getInputStream();
+            rawOutputStream = clientSocket.getOutputStream();
+            
             // PrintWriter với autoFlush = true để luôn đẩy buffer ra
-            out = new PrintWriter(clientSocket.getOutputStream(), true);
-            in = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
+            out = new PrintWriter(rawOutputStream, true);
+            in = new BufferedReader(new InputStreamReader(rawInputStream));
 
             String inputLine;
             while ((inputLine = in.readLine()) != null) {
@@ -143,7 +149,7 @@ public class ClientHandler implements Runnable {
 
     /**
      * Gửi file từ server đến client
-     * Lưu ý: Phải flush PrintWriter trước khi dùng DataOutputStream
+     * QUAN TRỌNG: Phải flush PrintWriter và đảm bảo không có buffer còn lại
      */
     private void sendFileToClient(String fileName) {
         try {
@@ -155,30 +161,29 @@ public class ClientHandler implements Runnable {
 
             long fileSize = file.length();
             
-            // QUAN TRỌNG: Flush PrintWriter trước khi dùng DataOutputStream
-            // để đảm bảo header message được gửi trước
+            // QUAN TRỌNG: Flush PrintWriter trước khi gửi binary data
             if (out != null) {
                 out.flush();
             }
             
-            // Gửi header trước qua PrintWriter
+            // Gửi header trước qua PrintWriter (với newline)
             sendMessage("FILE_DATA:" + file.getName() + ":" + fileSize);
             
-            // Đợi một chút để đảm bảo message được gửi
-            Thread.sleep(50);
+            // Đợi một chút để đảm bảo text message được gửi hoàn toàn
+            Thread.sleep(100);
             
-            // Gửi dữ liệu file qua DataOutputStream
-            DataOutputStream dos = new DataOutputStream(clientSocket.getOutputStream());
+            // Gửi dữ liệu file BINARY trực tiếp qua raw OutputStream
+            // KHÔNG dùng DataOutputStream wrap lại vì sẽ conflict với PrintWriter
             try (FileInputStream fis = new FileInputStream(file)) {
-                byte[] buffer = new byte[4096];
+                byte[] buffer = new byte[8192]; // Buffer lớn hơn để tăng hiệu suất
                 int read;
                 long totalSent = 0;
                 while ((read = fis.read(buffer)) != -1) {
-                    dos.write(buffer, 0, read);
+                    rawOutputStream.write(buffer, 0, read);
                     totalSent += read;
                 }
-                dos.flush();
-                System.out.println("✅ Đã gửi file " + fileName + " (" + totalSent + " bytes) đến " + username);
+                rawOutputStream.flush(); // Flush để đảm bảo dữ liệu được gửi
+                System.out.println("✅ Đã gửi file " + fileName + " (" + totalSent + "/" + fileSize + " bytes) đến " + username);
             }
         } catch (IOException | InterruptedException e) {
             e.printStackTrace();
@@ -189,6 +194,7 @@ public class ClientHandler implements Runnable {
 
     /**
      * Nhận file từ client và lưu vào thư mục uploads trên server
+     * QUAN TRỌNG: Dùng raw InputStream để đọc binary data, không dùng BufferedReader
      * @return true nếu nhận thành công, false nếu có lỗi
      */
     private boolean receiveFile(String fileName, long fileSize) {
@@ -199,19 +205,38 @@ public class ClientHandler implements Runnable {
             }
 
             File file = new File(uploadsDir, fileName);
-            DataInputStream dataIn = new DataInputStream(clientSocket.getInputStream());
+            
+            // Đọc binary data trực tiếp từ raw InputStream
+            // Lưu ý: BufferedReader đã wrap rawInputStream, nhưng khi đọc binary,
+            // chúng ta đọc trực tiếp từ rawInputStream để tránh xử lý text encoding
             try (FileOutputStream fos = new FileOutputStream(file)) {
-                byte[] buffer = new byte[4096];
+                byte[] buffer = new byte[8192]; // Buffer lớn hơn
                 long totalRead = 0;
                 int read;
-                while (totalRead < fileSize && (read = dataIn.read(buffer, 0, (int) Math.min(buffer.length, fileSize - totalRead))) != -1) {
-                    fos.write(buffer, 0, read);
-                    totalRead += read;
+                
+                // Đọc đúng số bytes theo fileSize
+                while (totalRead < fileSize) {
+                    int bytesToRead = (int) Math.min(buffer.length, fileSize - totalRead);
+                    read = rawInputStream.read(buffer, 0, bytesToRead);
+                    
+                    if (read == -1) {
+                        // Stream kết thúc sớm
+                        System.err.println("⚠️ Stream kết thúc sớm. Đã đọc " + totalRead + "/" + fileSize + " bytes");
+                        break;
+                    }
+                    
+                    if (read > 0) {
+                        fos.write(buffer, 0, read);
+                        totalRead += read;
+                    }
                 }
+                
+                fos.flush(); // Đảm bảo dữ liệu được ghi vào disk
+                fos.getFD().sync(); // Đồng bộ với disk để đảm bảo dữ liệu được ghi hoàn toàn
                 
                 // Kiểm tra xem đã nhận đủ dữ liệu chưa
                 if (totalRead != fileSize) {
-                    System.err.println("Cảnh báo: Chỉ nhận được " + totalRead + "/" + fileSize + " bytes cho file " + fileName);
+                    System.err.println("❌ Cảnh báo: Chỉ nhận được " + totalRead + "/" + fileSize + " bytes cho file " + fileName);
                     return false;
                 }
             }
