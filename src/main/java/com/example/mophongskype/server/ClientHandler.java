@@ -83,14 +83,30 @@ public class ClientHandler implements Runnable {
                     if (command.equals("SEND_FILE") && parts.length >= 3) {
                         String fileName = parts[1];
                         long fileSize = Long.parseLong(parts[2]);
-                        receiveFile(fileName, fileSize);
-                        server.broadcastMessage("SYSTEM", username + " đã gửi file: " + fileName);
+                        if (receiveFile(fileName, fileSize)) {
+                            // File nhận thành công, thông báo cho người gửi
+                            sendMessage("FILE_RECEIVED:" + fileName);
+                            // Broadcast cho tất cả client khác (trừ người gửi) để họ tự động tải về
+                            server.broadcastNewFile(username, fileName);
+                            // Broadcast tin nhắn thông báo
+                            server.broadcastMessage("SYSTEM", username + " đã gửi file: " + fileName);
+                        } else {
+                            sendMessage("FILE_FAILED:" + fileName);
+                        }
                     } else if (command.equals("SEND_MEDIA") && parts.length >= 4) {
                         String mediaType = parts[1]; // e.g. AUDIO or VIDEO or IMAGE
                         String fileName = parts[2];
                         long fileSize = Long.parseLong(parts[3]);
-                        receiveFile(fileName, fileSize);
-                        server.broadcastMessage("SYSTEM", username + " đã gửi " + mediaType + ": " + fileName);
+                        if (receiveFile(fileName, fileSize)) {
+                            // File nhận thành công
+                            sendMessage("FILE_RECEIVED:" + fileName);
+                            // Broadcast cho tất cả client khác (trừ người gửi)
+                            server.broadcastNewFile(username, fileName);
+                            // Broadcast tin nhắn thông báo
+                            server.broadcastMessage("SYSTEM", username + " đã gửi " + mediaType + ": " + fileName);
+                        } else {
+                            sendMessage("FILE_FAILED:" + fileName);
+                        }
                     }
                 } catch (NumberFormatException e) {
                     sendMessage("FILE_FAILED:Sai định dạng filesize");
@@ -125,6 +141,10 @@ public class ClientHandler implements Runnable {
         }
     }
 
+    /**
+     * Gửi file từ server đến client
+     * Lưu ý: Phải flush PrintWriter trước khi dùng DataOutputStream
+     */
     private void sendFileToClient(String fileName) {
         try {
             File file = new File("uploads", fileName); // file trên server
@@ -134,30 +154,49 @@ public class ClientHandler implements Runnable {
             }
 
             long fileSize = file.length();
-            // Gửi header trước
+            
+            // QUAN TRỌNG: Flush PrintWriter trước khi dùng DataOutputStream
+            // để đảm bảo header message được gửi trước
+            if (out != null) {
+                out.flush();
+            }
+            
+            // Gửi header trước qua PrintWriter
             sendMessage("FILE_DATA:" + file.getName() + ":" + fileSize);
-
-            // Gửi dữ liệu file qua socket
+            
+            // Đợi một chút để đảm bảo message được gửi
+            Thread.sleep(50);
+            
+            // Gửi dữ liệu file qua DataOutputStream
             DataOutputStream dos = new DataOutputStream(clientSocket.getOutputStream());
             try (FileInputStream fis = new FileInputStream(file)) {
                 byte[] buffer = new byte[4096];
                 int read;
+                long totalSent = 0;
                 while ((read = fis.read(buffer)) != -1) {
                     dos.write(buffer, 0, read);
+                    totalSent += read;
                 }
+                dos.flush();
+                System.out.println("✅ Đã gửi file " + fileName + " (" + totalSent + " bytes) đến " + username);
             }
-            dos.flush();
-        } catch (IOException e) {
+        } catch (IOException | InterruptedException e) {
             e.printStackTrace();
             sendMessage("FILE_FAILED:" + fileName);
         }
     }
 
 
-    private void receiveFile(String fileName, long fileSize) {
+    /**
+     * Nhận file từ client và lưu vào thư mục uploads trên server
+     * @return true nếu nhận thành công, false nếu có lỗi
+     */
+    private boolean receiveFile(String fileName, long fileSize) {
         try {
             File uploadsDir = new File("uploads");
-            if (!uploadsDir.exists()) uploadsDir.mkdir();
+            if (!uploadsDir.exists()) {
+                uploadsDir.mkdirs();
+            }
 
             File file = new File(uploadsDir, fileName);
             DataInputStream dataIn = new DataInputStream(clientSocket.getInputStream());
@@ -169,13 +208,20 @@ public class ClientHandler implements Runnable {
                     fos.write(buffer, 0, read);
                     totalRead += read;
                 }
+                
+                // Kiểm tra xem đã nhận đủ dữ liệu chưa
+                if (totalRead != fileSize) {
+                    System.err.println("Cảnh báo: Chỉ nhận được " + totalRead + "/" + fileSize + " bytes cho file " + fileName);
+                    return false;
+                }
             }
 
-            System.out.println("Đã nhận file: " + fileName + " từ " + username);
-            sendMessage("FILE_RECEIVED:" + fileName);
+            System.out.println("✅ Đã nhận file: " + fileName + " (" + fileSize + " bytes) từ " + username);
+            return true;
         } catch (IOException e) {
-            System.err.println("Lỗi nhận file: " + e.getMessage());
-            sendMessage("FILE_FAILED:" + fileName);
+            System.err.println("❌ Lỗi nhận file: " + e.getMessage());
+            e.printStackTrace();
+            return false;
         }
     }
 

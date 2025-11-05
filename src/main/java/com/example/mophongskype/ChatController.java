@@ -160,25 +160,22 @@ public class ChatController {
     private void setupClientCallbacks() {
         if (chatClient == null) return;
 
-        chatClient.setOnFileReceived(file -> {
-            Platform.runLater(() -> {
-                File savedFile = saveToDownloads(file); // This saves to downloads
-                boolean isImage = isImageFile(savedFile.getName());
-                showFileMessage(savedFile, isImage);
-            });
-        });
-
-
-
-
+        // Xử lý thông báo file đã nhận kèm tên người gửi
         chatClient.setOnMessageReceived(message -> {
             Platform.runLater(() -> {
-                if (message.startsWith("FILE_SAVED:")) {
-                    String[] parts = message.substring("FILE_SAVED:".length()).split(":", 2);
-                    File file = new File(parts[0]);
-                    boolean isImage = parts.length > 1 && parts[1].equals("IMAGE");
-                    showFileMessage(file, isImage);
+                if (message.startsWith("FILE_RECEIVED:")) {
+                    // Format: FILE_RECEIVED:sender:filePath
+                    String[] parts = message.split(":", 3);
+                    if (parts.length >= 3) {
+                        String sender = parts[1];
+                        String filePath = parts[2];
+                        File file = new File(filePath);
+                        boolean isImage = isImageFile(file.getName());
+                        // Hiển thị file trong chat với thông báo "Đã nhận file"
+                        addFileReceivedMessage(sender, file, isImage);
+                    }
                 } else {
+                    // Xử lý tin nhắn thường
                     String[] parts = message.split(":", 2);
                     if (parts.length == 2) {
                         addMessageToChat(parts[0], parts[1], false);
@@ -186,6 +183,7 @@ public class ChatController {
                 }
             });
         });
+
 
 
 
@@ -233,15 +231,6 @@ public class ChatController {
                 }).start();
             });
         });
-
-        chatClient.setOnFileReceived(file -> {
-            Platform.runLater(() -> {
-                boolean isImage = file.getName().toLowerCase().matches(".*\\.(png|jpg|jpeg|gif)$");
-                showFileMessage(file, isImage);
-            });
-        });
-
-
     }
 
     @FXML
@@ -439,22 +428,80 @@ public class ChatController {
         scrollToBottom();
     }
 
-    private File saveToDownloads(File file) {
-        File downloadsDir = new File(System.getProperty("user.home"), "downloads");
-        if (!downloadsDir.exists()) downloadsDir.mkdirs();
-        File dest = new File(downloadsDir, file.getName());
-        try (InputStream in = new FileInputStream(file);
-             OutputStream out = new FileOutputStream(dest)) {
-            byte[] buffer = new byte[4096];
-            int len;
-            while ((len = in.read(buffer)) != -1) {
-                out.write(buffer, 0, len);
+    /**
+     * Hiển thị thông báo file đã nhận trong chat
+     */
+    private void addFileReceivedMessage(String sender, File file, boolean isImage) {
+        String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"));
+        
+        VBox fileBox = new VBox();
+        fileBox.setSpacing(5);
+        fileBox.setStyle("-fx-background-color: #e8f5e9; -fx-background-radius: 8; -fx-padding: 8; -fx-border-color: #4caf50; -fx-border-radius: 8; -fx-border-width: 1;");
+        
+        HBox headerBox = new HBox();
+        headerBox.setSpacing(5);
+        
+        Text timeText = new Text("[" + timestamp + "]");
+        timeText.setStyle("-fx-fill: #666; -fx-font-size: 10px;");
+        
+        Text senderText = new Text(sender + " đã gửi file:");
+        senderText.setStyle("-fx-fill: #2e7d32; -fx-font-weight: bold; -fx-font-size: 12px;");
+        
+        headerBox.getChildren().addAll(timeText, senderText);
+        
+        Label fileLabel = new Label("📁 " + file.getName() + " (Đã tải về: " + file.getParent() + ")");
+        fileLabel.setStyle("-fx-text-fill: #1b5e20; -fx-font-size: 12px;");
+        
+        fileBox.getChildren().add(headerBox);
+        fileBox.getChildren().add(fileLabel);
+        
+        // Hiển thị preview nếu là ảnh
+        if (isImage && file.exists()) {
+            try {
+                ImageView imageView = new ImageView(
+                        new javafx.scene.image.Image(file.toURI().toString(), 200, 0, true, true)
+                );
+                imageView.setPreserveRatio(true);
+                fileBox.getChildren().add(imageView);
+            } catch (Exception e) {
+                System.err.println("Lỗi hiển thị ảnh: " + e.getMessage());
             }
-        } catch (IOException e) {
-            e.printStackTrace();
-            return file; // fallback
+        } else if (file.exists()) {
+            // Với audio/video: thêm controls
+            String lower = file.getName().toLowerCase();
+            if (lower.endsWith(".mp3") || lower.endsWith(".wav") || lower.endsWith(".ogg")) {
+                Media media = new Media(file.toURI().toString());
+                MediaPlayer mediaPlayer = new MediaPlayer(media);
+                Button playBtn = new Button("▶ Play Audio");
+                playBtn.setOnAction(e -> mediaPlayer.play());
+                Button pauseBtn = new Button("⏸ Pause");
+                pauseBtn.setOnAction(e -> mediaPlayer.pause());
+                fileBox.getChildren().addAll(playBtn, pauseBtn);
+            } else if (lower.endsWith(".mp4") || lower.endsWith(".avi") || lower.endsWith(".mov") || lower.endsWith(".mkv")) {
+                Media media = new Media(file.toURI().toString());
+                MediaPlayer mediaPlayer = new MediaPlayer(media);
+                MediaView mediaView = new MediaView(mediaPlayer);
+                mediaView.setFitWidth(250);
+                mediaView.setPreserveRatio(true);
+                Button playBtn = new Button("▶ Play Video");
+                playBtn.setOnAction(e -> mediaPlayer.play());
+                Button pauseBtn = new Button("⏸ Pause");
+                pauseBtn.setOnAction(e -> mediaPlayer.pause());
+                fileBox.getChildren().addAll(mediaView, playBtn, pauseBtn);
+            } else {
+                // Link để mở file
+                Hyperlink link = new Hyperlink("📂 Mở file: " + file.getName());
+                link.setOnAction(e -> {
+                    if (hostServices != null) {
+                        hostServices.showDocument(file.getParentFile().toURI().toString());
+                    }
+                });
+                fileBox.getChildren().add(link);
+            }
         }
-        return dest;
+        
+        chatContainer.getChildren().add(fileBox);
+        scrollToBottom();
     }
 
     private void scrollToBottom() {
